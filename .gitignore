@@ -1,0 +1,14 @@
+.burstcode/
+.vscode/
+**/bin/
+**/obj/
+**/artifacts/
+**/node_modules/
+**/dist/
+ApiMonitor.Api/wwwroot/
+*.db
+*.db-*
+*.log
+ApiMonitor.Api/appsettings.json
+ApiMonitor.Api/appsettings.*.json
+*.user
