@@ -1,17 +1,40 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 const provider = ref('OpenAIOfficial'), protocol = ref('OpenAI'), key = ref(''), endpointUrl = ref(''), model = ref(''), models = ref<string[]>([]), modelError = ref(''), loadingModels = ref(false), useProxy = ref(false), result = ref(''), loading = ref(false)
-type Monitor = { id:number; name:string; kind:string; provider?:string; protocol?:string; url:string; model:string; useProxy:boolean; intervalMinutes:number; emails:string[]; enabled:boolean; nextRunAt:string; lastRunAt?:string; lastSuccess?:boolean; lastMessage:string; alertActive:boolean; isRunning:boolean; runningSince?:string; hasKey:boolean; proxyUrl?:string; proxyType?:string; proxyProtocol?:string; proxyUsername?:string; hasProxyPassword?:boolean; dbKind?:string; dbType?:string; dbHost?:string; dbPort?:number; dbName?:string; dbUser?:string }
-const view = ref<'check'|'monitor'>(window.location.pathname === '/monitor' ? 'monitor' : 'check'), monitors = ref<Monitor[]>([]), monitorLoading = ref(false), monitorMessage = ref('')
+type Monitor = { id:number; name:string; kind:string; provider?:string; protocol?:string; url:string; model:string; useProxy:boolean; intervalMinutes:number; notifyChannelIds:number[]; enabled:boolean; nextRunAt:string; lastRunAt?:string; lastSuccess?:boolean; lastMessage:string; alertActive:boolean; isRunning:boolean; runningSince?:string; hasKey:boolean; proxyUrl?:string; proxyType?:string; proxyProtocol?:string; proxyUsername?:string; hasProxyPassword?:boolean; dbKind?:string; dbType?:string; dbHost?:string; dbPort?:number; dbName?:string; dbUser?:string }
+const authed = ref(false), authChecking = ref(true), authUser = ref(''), authMode = ref<'login'|'register'>('login'), authBusy = ref(false), authError = ref('')
+const loginForm = ref({ username: '', password: '' })
+async function checkAuth(): Promise<boolean> {
+  try { const r = await fetch('/api/auth/me'); if (r.ok) { authUser.value = (await r.json()).username; authed.value = true } else authed.value = false }
+  catch { authed.value = false }
+  authChecking.value = false; return authed.value
+}
+async function submitAuth() {
+  if (!loginForm.value.username.trim() || !loginForm.value.password) { authError.value = '请输入用户名和密码'; return }
+  authBusy.value = true; authError.value = ''
+  try {
+    const r = await fetch(`/api/auth/${authMode.value === 'login' ? 'login' : 'register'}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(loginForm.value) })
+    if (!r.ok) throw new Error(await r.text())
+    authUser.value = loginForm.value.username; authed.value = true; loginForm.value = { username: '', password: '' }
+    checkAuth().then(() => { if (!authed.value) return; if (view.value === 'monitor') openMonitor(false); else if (view.value === 'notify') openNotify(false) })
+  } catch (e) { authError.value = e instanceof Error ? e.message : '请求失败' } finally { authBusy.value = false }
+}
+async function logout() { stopMonitorPolling(); try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {} authed.value = false; showForm.value = false; runsTask.value = null; runDetail.value = null; showChannelForm.value = false }
+const view = ref<'check'|'monitor'|'notify'>(window.location.pathname === '/monitor' ? 'monitor' : window.location.pathname === '/notifications' ? 'notify' : 'check'), monitors = ref<Monitor[]>([]), monitorLoading = ref(false), monitorMessage = ref('')
 let monitorTimer: ReturnType<typeof setInterval> | undefined
-const monitorForm = ref({name:'', kind:'http', provider:'OpenAIOfficial', protocol:'OpenAI', url:'', model:'', key:'', useProxy:false, intervalMinutes:5, emails:'', proxyType:'http', proxyProtocol:'tcp', proxyUrl:'', proxyUsername:'', proxyPassword:'', dbType:'mysql', dbHost:'', dbPort:3306, dbName:'', dbUser:'', dbPassword:''})
+const monitorForm = ref({name:'', kind:'http', provider:'OpenAIOfficial', protocol:'OpenAI', url:'', model:'', key:'', useProxy:false, intervalMinutes:5, channelIds:[] as number[], proxyType:'http', proxyProtocol:'tcp', proxyUrl:'', proxyUsername:'', proxyPassword:'', dbType:'mysql', dbHost:'', dbPort:3306, dbName:'', dbUser:'', dbPassword:'', wanjitongKeys:''})
 const showForm = ref(false), editingId = ref<number|null>(null)
 const runsTask = ref<Monitor|null>(null), runsList = ref<any[]>([]), runsLoading = ref(false)
+const runDetail = ref<Record<string, any>|null>(null), runDetailLoading = ref(false)
+type Channel = { id:number; name:string; type:string; target:string; createdAt:string }
+const channels = ref<Channel[]>([])
+const showChannelForm = ref(false), editingChannelId = ref<number|null>(null), channelLoading = ref(false), channelMessage = ref('')
+const channelForm = ref({name:'', type:'email', target:''})
 const stats = computed(() => ({total:monitors.value.length, running:monitors.value.filter(m=>m.enabled).length, alerts:monitors.value.filter(m=>m.alertActive).length, paused:monitors.value.filter(m=>!m.enabled).length}))
 const stateOf = (m:Monitor) => m.isRunning ? 'checking' : !m.enabled ? 'paused' : m.alertActive ? 'alert' : m.lastSuccess === false ? 'fail' : m.lastSuccess === true ? 'ok' : 'pending'
 const stateText: Record<string,string> = {checking:'检测中', paused:'已暂停', alert:'告警中', fail:'失败', ok:'正常', pending:'待执行'}
-const categories = [{ id: 'llm', name: 'LLM' }, { id: 'api', name: '普通 API' }, { id: 'http', name: 'HTTP' }], category = ref('llm')
-const providers = [{ id: 'OpenAIOfficial', name: 'OpenAI', type: 'llm', protocol: 'OpenAI' }, { id: 'Claude', name: 'Claude', type: 'llm', protocol: 'Anthropic' }, { id: 'LegacyChatGPT', name: 'ChatGPT', type: 'llm', protocol: 'OpenAI' }, { id: 'LegacyAnthropic', name: 'Anthropic', type: 'llm', protocol: 'Anthropic' }, { id: 'Ark', name: '方舟', type: 'llm', protocol: 'OpenAI' }, { id: 'Mimo', name: 'Mimo', type: 'llm', protocol: 'OpenAI' }, { id: 'GLM', name: 'GLM', type: 'llm', protocol: 'OpenAI' }, { id: 'Custom', name: '自定义', type: 'llm', protocol: 'OpenAI' }, { id: 'Bocha', name: 'Bocha', type: 'api', protocol: '' }, { id: 'Tavily', name: 'Tavily', type: 'api', protocol: '' }, { id: 'Brave', name: 'Brave', type: 'api', protocol: '' }]
+const categories = [{ id: 'llm', name: 'LLM' }, { id: 'api', name: '搜索 API' }, { id: 'http', name: 'HTTP' }], category = ref('llm')
+const providers = [{ id: 'OpenAIOfficial', name: 'OpenAI', type: 'llm', protocol: 'OpenAI' }, { id: 'Claude', name: 'Claude', type: 'llm', protocol: 'Anthropic' }, { id: 'LegacyChatGPT', name: 'ChatGPT', type: 'llm', protocol: 'OpenAI' }, { id: 'LegacyAnthropic', name: 'Anthropic', type: 'llm', protocol: 'Anthropic' }, { id: 'Ark', name: '方舟', type: 'llm', protocol: 'OpenAI' }, { id: 'Mimo', name: 'Mimo', type: 'llm', protocol: 'OpenAI' }, { id: 'GLM', name: 'GLM', type: 'llm', protocol: 'OpenAI' }, { id: 'Custom', name: '自定义', type: 'llm', protocol: 'OpenAI' }, { id: 'Bocha', name: 'Bocha', type: 'api', protocol: '' }, { id: 'Tavily', name: 'Tavily', type: 'api', protocol: '' }, { id: 'Brave', name: 'Brave', type: 'api', protocol: '' }, { id: 'Qianfan', name: '百度千帆', type: 'api', protocol: '' }, { id: 'Serper', name: 'Serper', type: 'api', protocol: '' }, { id: 'Exa', name: 'Exa', type: 'api', protocol: '' }]
 const visibleProviders = computed(() => providers.filter(p => p.type === (category.value === 'api' ? 'api' : 'llm')))
 const dbTypes = [{ id: 'mysql', name: 'MySQL / OceanBase / Manticore', port: 3306 }, { id: 'tdengine', name: 'TDengine', port: 6041 }, { id: 'milvus', name: 'Milvus', port: 19530 }, { id: 'tugraph', name: 'TuGraph', port: 7070 }]
 const proxyTypes = [{ id: 'http', name: 'HTTP 代理' }, { id: 'socks5', name: 'SOCKS5 代理' }]
@@ -25,8 +48,8 @@ function fmt(v?: string) { if (!v) return '—'; const d = new Date(v); return N
 function intervalLabel(minutes: number) { return minutes >= 1440 ? `每 ${minutes / 1440} 天` : minutes >= 60 ? `每 ${minutes / 60} 小时` : `每 ${minutes} 分钟` }
 function iconOf(m: Monitor) { return m.kind === 'http' ? '⬡' : m.kind === 'llm' ? '◆' : m.kind === 'proxy' ? '⇄' : m.kind === 'db' ? '⛁' : '⌁' }
 function targetOf(m: Monitor) { return m.kind === 'http' ? m.url : m.kind === 'proxy' ? `${m.proxyType ?? 'http'} · ${m.proxyUrl ?? ''}` : m.kind === 'db' ? `${m.dbType ?? ''} · ${m.dbHost ?? ''}:${m.dbPort ?? ''}` : (m.provider ?? '') + (m.model ? ' · ' + m.model : '') }
-async function api(path: string, init?: RequestInit) { const r = await fetch(path, init); if (!r.ok) throw new Error(await r.text()); return r.status === 204 ? null : r.json() }
-async function loadMonitors(silent = false) { if (!silent) monitorLoading.value = true; try { monitors.value = await api('/api/monitoring') } finally { monitorLoading.value = false } }
+async function api(path: string, init?: RequestInit) { const r = await fetch(path, init); if (r.status === 401) { authed.value = false; stopMonitorPolling(); throw new Error('登录已失效，请重新登录') } if (!r.ok) throw new Error(await r.text()); return r.status === 204 ? null : r.json() }
+async function loadMonitors(silent = false) { if (!silent) monitorLoading.value = true; try { monitors.value = await api('/api/monitoring') } catch (e) { if (!silent) monitorMessage.value = e instanceof Error ? e.message : '加载失败' } finally { monitorLoading.value = false } }
 const canLoadMonitorModels = computed(() => monitorForm.value.kind === 'llm' && (! (monitorForm.value.provider === 'Custom' && !monitorForm.value.url.trim())) && (!!monitorForm.value.key.trim() || (editingId.value !== null && monitors.value.some(m => m.id === editingId.value && m.hasKey && m.provider === monitorForm.value.provider))))
 async function loadModelsForMonitor() {
   if (!canLoadMonitorModels.value) return
@@ -41,24 +64,57 @@ async function loadModelsForMonitor() {
   } catch (e) { models.value = []; modelError.value = e instanceof Error ? e.message : '模型获取失败，可手动填写' }
   finally { loadingModels.value = false }
 }
-async function saveMonitor() { monitorMessage.value = ''; try { const f = monitorForm.value; const payload = { name: f.name, kind: f.kind, provider: f.kind === 'llm' || f.kind === 'api' ? f.provider : null, protocol: f.kind === 'llm' ? f.protocol : null, url: f.kind === 'http' ? f.url : f.kind === 'llm' && f.provider === 'Custom' ? f.url : null, model: f.kind === 'llm' ? f.model : null, key: f.kind === 'llm' || f.kind === 'api' ? f.key : '', useProxy: f.useProxy, intervalMinutes: f.intervalMinutes, emails: f.emails.split(',').map(x => x.trim()).filter(Boolean), proxyUrl: f.kind === 'proxy' ? f.proxyUrl : null, proxyProtocol: f.kind === 'proxy' ? f.proxyProtocol : 'tcp', proxyUsername: f.kind === 'proxy' ? f.proxyUsername : null, proxyPassword: f.kind === 'proxy' ? f.proxyPassword : null, dbKind: f.kind === 'db' ? f.dbType : null, dbHost: f.kind === 'db' ? f.dbHost : null, dbPort: f.kind === 'db' ? Number(f.dbPort) || 0 : 0, dbName: f.kind === 'db' ? f.dbName : null, dbUser: f.kind === 'db' ? f.dbUser : null, dbPassword: f.kind === 'db' ? f.dbPassword : null }; if (editingId.value !== null) await api(`/api/monitoring/${editingId.value}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); else await api('/api/monitoring', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); showForm.value = false; await loadMonitors() } catch (e) { monitorMessage.value = e instanceof Error ? e.message : '保存失败' } }
-function openCreate() { editingId.value = null; monitorForm.value = {name:'', kind:'http', provider:'OpenAIOfficial', protocol:'OpenAI', url:'', model:'', key:'', useProxy:false, intervalMinutes:5, emails:'', proxyType:'http', proxyProtocol:'tcp', proxyUrl:'', proxyUsername:'', proxyPassword:'', dbType:'mysql', dbHost:'', dbPort:3306, dbName:'', dbUser:'', dbPassword:''}; monitorMessage.value = ''; models.value = []; showForm.value = true }
-function openEdit(m: Monitor) { const dbKind = m.dbKind ?? m.dbType ?? 'mysql'; const defaultPort = dbKind.toLowerCase() === 'tdengine' ? 6041 : dbKind.toLowerCase() === 'milvus' ? 19530 : dbKind.toLowerCase() === 'tugraph' ? 7070 : 3306; editingId.value = m.id; monitorForm.value = { name: m.name, kind: m.kind, provider: m.provider ?? 'OpenAIOfficial', protocol: m.protocol ?? 'OpenAI', url: m.url ?? '', model: m.model ?? '', key: '', useProxy: m.useProxy, intervalMinutes: m.intervalMinutes, emails: m.emails.join(', '), proxyType: (m as Monitor & { proxyType?: string }).proxyType ?? 'http', proxyProtocol: m.proxyProtocol ?? 'tcp', proxyUrl: m.proxyUrl ?? '', proxyUsername: m.proxyUsername ?? '', proxyPassword: '', dbType: dbKind.toLowerCase(), dbHost: m.dbHost ?? '', dbPort: m.dbPort && m.dbPort > 0 ? m.dbPort : defaultPort, dbName: m.dbName ?? '', dbUser: m.dbUser ?? '', dbPassword: '' }; monitorMessage.value = ''; models.value = []; showForm.value = true }
+async function saveMonitor() { monitorMessage.value = ''; try { const f = monitorForm.value; const payload = { name: f.name, kind: f.kind, provider: f.kind === 'llm' || f.kind === 'api' ? f.provider : null, protocol: f.kind === 'llm' ? f.protocol : null, url: f.kind === 'http' ? f.url : f.kind === 'llm' && f.provider === 'Custom' ? f.url : null, model: f.kind === 'llm' ? f.model : null, key: f.kind === 'llm' || f.kind === 'api' ? f.key : '', useProxy: f.useProxy, intervalMinutes: f.intervalMinutes, notifyChannelIds: f.channelIds, proxyUrl: f.kind === 'proxy' ? f.proxyUrl : null, proxyProtocol: f.kind === 'proxy' ? f.proxyProtocol : 'tcp', proxyUsername: f.kind === 'proxy' ? f.proxyUsername : null, proxyPassword: f.kind === 'proxy' ? f.proxyPassword : null, dbKind: f.kind === 'db' ? f.dbType : null, dbHost: f.kind === 'db' ? f.dbHost : null, dbPort: f.kind === 'db' ? Number(f.dbPort) || 0 : 0, dbName: f.kind === 'db' ? f.dbName : null, dbUser: f.kind === 'db' ? f.dbUser : null, dbPassword: f.kind === 'db' ? f.dbPassword : null }; if (editingId.value !== null) await api(`/api/monitoring/${editingId.value}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); else await api('/api/monitoring', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); showForm.value = false; await loadMonitors() } catch (e) { monitorMessage.value = e instanceof Error ? e.message : '保存失败' } }
+function openCreate() { editingId.value = null; loadChannels(true); monitorForm.value = {name:'', kind:'http', provider:'OpenAIOfficial', protocol:'OpenAI', url:'', model:'', key:'', useProxy:false, intervalMinutes:5, channelIds:[] as number[], proxyType:'http', proxyProtocol:'tcp', proxyUrl:'', proxyUsername:'', proxyPassword:'', dbType:'mysql', dbHost:'', dbPort:3306, dbName:'', dbUser:'', dbPassword:''}; monitorMessage.value = ''; models.value = []; showForm.value = true }
+function openEdit(m: Monitor) { loadChannels(true); const dbKind = m.dbKind ?? m.dbType ?? 'mysql'; const defaultPort = dbKind.toLowerCase() === 'tdengine' ? 6041 : dbKind.toLowerCase() === 'milvus' ? 19530 : dbKind.toLowerCase() === 'tugraph' ? 7070 : 3306; editingId.value = m.id; monitorForm.value = { name: m.name, kind: m.kind, provider: m.provider ?? 'OpenAIOfficial', protocol: m.protocol ?? 'OpenAI', url: m.url ?? '', model: m.model ?? '', key: '', useProxy: m.useProxy, intervalMinutes: m.intervalMinutes, channelIds: [...(m.notifyChannelIds ?? [])], proxyType: (m as Monitor & { proxyType?: string }).proxyType ?? 'http', proxyProtocol: m.proxyProtocol ?? 'tcp', proxyUrl: m.proxyUrl ?? '', proxyUsername: m.proxyUsername ?? '', proxyPassword: '', dbType: dbKind.toLowerCase(), dbHost: m.dbHost ?? '', dbPort: m.dbPort && m.dbPort > 0 ? m.dbPort : defaultPort, dbName: m.dbName ?? '', dbUser: m.dbUser ?? '', dbPassword: '' }; monitorMessage.value = ''; models.value = []; showForm.value = true }
 async function toggleMonitor(m: Monitor) { await api(`/api/monitoring/${m.id}/enabled`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ enabled: !m.enabled }) }); await loadMonitors(true) }
 async function runMonitor(m: Monitor) { await api(`/api/monitoring/${m.id}/run`, { method: 'POST' }); await loadMonitors(true) }
 async function deleteMonitor(m: Monitor) { if (!confirm(`删除监控任务「${m.name}」？`)) return; await api(`/api/monitoring/${m.id}`, { method: 'DELETE' }); await loadMonitors(true) }
 async function openRuns(m: Monitor) { runsTask.value = m; runsLoading.value = true; try { runsList.value = await api(`/api/monitoring/${m.id}/runs`) } finally { runsLoading.value = false } }
+async function openRunDetail(r: Record<string, any>) {
+  runDetail.value = r; runDetailLoading.value = true
+  try { runDetail.value = await api(`/api/monitoring/runs/${r.id}`) }
+  catch (e) { runDetail.value = { ...r, detailError: e instanceof Error ? e.message : '详情加载失败' } }
+  finally { runDetailLoading.value = false }
+}
 function stopMonitorPolling() { if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = undefined } }
 function openCheck() { stopMonitorPolling(); view.value = 'check'; window.history.pushState({}, '', '/') }
-function openMonitor(push = true) { view.value = 'monitor'; if (push && window.location.pathname !== '/monitor') window.history.pushState({}, '', '/monitor'); loadMonitors(); if (monitorTimer) clearInterval(monitorTimer); monitorTimer = setInterval(() => loadMonitors(true), 3000) }
-window.addEventListener('popstate', () => { if (window.location.pathname === '/monitor') openMonitor(false); else openCheck() })
-if (view.value === 'monitor') openMonitor(false)
+async function loadChannels(silent = false) { if (!silent) channelLoading.value = true; try { channels.value = await api('/api/notifications') } catch (e) { if (!silent) channelMessage.value = e instanceof Error ? e.message : '加载失败' } finally { channelLoading.value = false } }
+function openNotify(push = true) { stopMonitorPolling(); view.value = 'notify'; if (push && window.location.pathname !== '/notifications') window.history.pushState({}, '', '/notifications'); loadChannels() }
+function openChannelCreate() { editingChannelId.value = null; channelForm.value = {name:'', type:'email', target:''}; channelMessage.value = ''; showChannelForm.value = true }
+function openChannelEdit(c: Channel) { editingChannelId.value = c.id; channelForm.value = { name: c.name, type: c.type, target: '' }; channelMessage.value = ''; showChannelForm.value = true }
+async function saveChannel() { channelMessage.value = ''; try { const f = channelForm.value; const payload = { name: f.name, type: f.type, target: f.target }; if (editingChannelId.value !== null) await api(`/api/notifications/${editingChannelId.value}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); else await api('/api/notifications', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); showChannelForm.value = false; await loadChannels(true) } catch (e) { channelMessage.value = e instanceof Error ? e.message : '保存失败' } }
+async function deleteChannel(c: Channel) { if (!confirm(`删除通知渠道「${c.name}」？`)) return; await api(`/api/notifications/${c.id}`, { method: 'DELETE' }); await loadChannels(true) }
+function openMonitor(push = true) { view.value = 'monitor'; if (push && window.location.pathname !== '/monitor') window.history.pushState({}, '', '/monitor'); loadMonitors(); if (monitorTimer) clearInterval(monitorTimer); monitorTimer = setInterval(() => { if (authed.value) loadMonitors(true) }, 3000) }
+window.addEventListener('popstate', () => { if (window.location.pathname === '/monitor') openMonitor(false); else if (window.location.pathname === '/notifications') openNotify(false); else openCheck() })
+checkAuth().then(() => { if (!authed.value) return; if (view.value === 'monitor') openMonitor(false); else if (view.value === 'notify') openNotify(false) })
 </script>
 <template>
-  <div class="shell">
+  <div v-if="authChecking" class="auth-shell"><div class="auth-card"><div class="brand"><span class="brand-mark">◆</span>API<span class="brand-accent">Monitor</span></div><p class="auth-tip">正在检查登录状态…</p></div></div>
+
+  <div v-else-if="!authed" class="auth-shell">
+    <div class="auth-card">
+      <div class="brand"><span class="brand-mark">◆</span>API<span class="brand-accent">Monitor</span></div>
+      <h1 class="auth-title">{{authMode==='login' ? '登录到监控中心' : '创建新账号'}}</h1>
+      <p class="auth-sub">用户名 + 密码登录，监控任务与通知按账号隔离。</p>
+      <div class="auth-tabs">
+        <button type="button" :class="{active:authMode==='login'}" @click="authMode='login'; authError=''">登录</button>
+        <button type="button" :class="{active:authMode==='register'}" @click="authMode='register'; authError=''">注册</button>
+      </div>
+      <form @submit.prevent="submitAuth">
+        <div class="fld"><label class="fld-label">用户名</label><input v-model="loginForm.username" autocomplete="username" placeholder="3-32 位字母、数字或 _ . -" maxlength="32"/></div>
+        <div class="fld"><label class="fld-label">密码</label><input v-model="loginForm.password" type="password" :autocomplete="authMode==='login'?'current-password':'new-password'" placeholder="至少 6 位" maxlength="128"/></div>
+        <p v-if="authError" class="auth-error">{{authError}}</p>
+        <button class="btn-primary" type="submit" :disabled="authBusy">{{authBusy ? '请稍候…' : (authMode==='login' ? '登 录' : '注册并登录')}}</button>
+      </form>
+    </div>
+  </div>
+
+  <div v-else class="shell">
     <header class="topbar">
       <div class="brand"><span class="brand-mark">◆</span>API<span class="brand-accent">Monitor</span></div>
-<nav class="tabs"><button :class="{active:view==='check'}" @click="openCheck">快速检测</button><button :class="{active:view==='monitor'}" @click="openMonitor()">监控中心</button></nav>
+<nav class="tabs"><button :class="{active:view==='check'}" @click="openCheck">快速检测</button><button :class="{active:view==='monitor'}" @click="openMonitor()">监控中心</button><button :class="{active:view==='notify'}" @click="openNotify()">通知配置</button></nav>
+      <div class="user-zone"><span class="user-chip" :title="authUser">◉ {{authUser}}</span><button class="logout-btn" @click="logout">退出</button></div>
       <span class="live-badge"><i></i>SYSTEM LIVE</span>
     </header>
     <section v-if="view==='check'" class="page">
@@ -77,7 +133,7 @@ if (view.value === 'monitor') openMonitor(false)
             <div class="type-tabs">
               <button v-for="c in categories" :key="c.id" :class="{active:category===c.id}" @click="selectCategory(c.id)">{{c.name}}</button>
             </div>
-            <div class="rail-note"><strong>当前模式</strong><span>{{category==='llm' ? '真实对话与模型可用性' : category==='api' ? '普通 API 接口连通性' : '健康检查 URL 状态码'}}</span></div>
+            <div class="rail-note"><strong>当前模式</strong><span>{{category==='llm' ? '真实对话与模型可用性' : category==='api' ? '搜索 API 接口连通性' : '健康检查 URL 状态码'}}</span></div>
           </aside>
           <div class="form-area">
             <template v-if="category!=='http'">
@@ -118,9 +174,9 @@ if (view.value === 'monitor') openMonitor(false)
       </div>
     </section>
 
-    <section v-else class="page">
+    <section v-else-if="view==='monitor'" class="page">
       <div class="page-head row-head">
-        <div><h1>监控中心</h1><p>由后端按计划执行检测，异常时通过邮箱发送告警。</p></div>
+        <div><h1>监控中心</h1><p>由后端按计划执行检测，状态变更时按勾选的渠道发送通知。</p></div>
         <div class="head-actions">
           <button class="btn-ghost" @click="loadMonitors()">↻ 刷新</button>
           <button class="btn-primary btn-inline" @click="openCreate">＋ 新建监控</button>
@@ -149,7 +205,7 @@ if (view.value === 'monitor') openMonitor(false)
           <div class="mmeta">
             <span>{{m.kind.toUpperCase()}}</span>
             <span>{{intervalLabel(m.intervalMinutes)}}</span>
-            <span>{{m.emails.length ? m.emails.length + ' 个告警邮箱' : '未配置告警'}}</span>
+            <span>{{(m.notifyChannelIds?.length ?? 0) ? m.notifyChannelIds.length + ' 个通知渠道' : '未配置通知'}}</span>
           </div>
           <p class="mmsg" :class="stateOf(m)">{{m.isRunning ? '检测执行中，请稍候…' : (m.lastMessage || '等待首次检测')}}</p>
           <div class="mfoot"><small>上次 {{fmt(m.lastRunAt)}}</small><small>下次 {{fmt(m.nextRunAt)}}</small></div>
@@ -159,6 +215,37 @@ if (view.value === 'monitor') openMonitor(false)
             <button class="op" :disabled="m.isRunning" @click="runMonitor(m)">{{m.isRunning ? '执行中…' : '立即检测'}}</button>
             <button class="op" @click="toggleMonitor(m)">{{m.enabled ? '暂停' : '启用'}}</button>
             <button class="op op-danger" @click="deleteMonitor(m)">删除</button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section v-else class="page">
+      <div class="page-head row-head">
+        <div><h1>通知配置</h1><p>维护邮箱与万记通通知渠道，创建监控时勾选即可在状态变更时接收通知。</p></div>
+        <div class="head-actions">
+          <button class="btn-ghost" @click="loadChannels()">↻ 刷新</button>
+          <button class="btn-primary btn-inline" @click="openChannelCreate">＋ 新建渠道</button>
+        </div>
+      </div>
+      <div v-if="channelLoading" class="empty">正在加载通知渠道…</div>
+      <div v-else-if="!channels.length" class="empty-card">
+        <div class="empty-icon">✉</div>
+        <strong>还没有通知渠道</strong>
+        <p>添加邮箱或万记通 API Key 渠道后，可在监控任务中勾选，状态变更（异常 / 恢复）时自动通知。</p>
+        <button class="btn-primary btn-inline" @click="openChannelCreate">＋ 新建渠道</button>
+      </div>
+      <div v-else class="cards">
+        <article v-for="c in channels" :key="c.id" class="mcard">
+          <div class="mcard-top">
+            <span class="micon" :class="c.type">{{c.type === 'email' ? '✉' : '◈'}}</span>
+            <div class="mhead"><strong>{{c.name}}</strong><small>{{c.type === 'email' ? c.target : '万记通 · ' + c.target}}</small></div>
+            <span class="status ok"><i></i>{{c.type === 'email' ? '邮箱' : '万记通'}}</span>
+          </div>
+          <div class="mmeta"><span>创建于 {{fmt(c.createdAt)}}</span></div>
+          <div class="mops" style="margin-top:auto">
+            <button class="op" @click="openChannelEdit(c)">编辑</button>
+            <button class="op op-danger" @click="deleteChannel(c)">删除</button>
           </div>
         </article>
       </div>
@@ -176,7 +263,7 @@ if (view.value === 'monitor') openMonitor(false)
       </div>
       <div class="modal-body">
         <div class="kind-picker">
-          <button type="button" v-for="k in [{id:'http',icon:'⬡',name:'HTTP 监控',desc:'检测 URL 返回 200'},{id:'llm',icon:'◆',name:'LLM 模型',desc:'真实对话可用性'},{id:'api',icon:'⌁',name:'普通 API',desc:'接口连通性'},{id:'proxy',icon:'⇄',name:'代理检测',desc:'HTTP / SOCKS5 连通性'},{id:'db',icon:'⛁',name:'数据库',desc:'MySQL / TDengine 等'}]" :key="k.id"
+          <button type="button" v-for="k in [{id:'http',icon:'⬡',name:'HTTP 监控',desc:'检测 URL 返回 200'},{id:'llm',icon:'◆',name:'LLM 模型',desc:'真实对话可用性'},{id:'api',icon:'⌁',name:'搜索 API',desc:'搜索引擎接口连通性'},{id:'proxy',icon:'⇄',name:'代理检测',desc:'HTTP / SOCKS5 连通性'},{id:'db',icon:'⛁',name:'数据库',desc:'MySQL / TDengine 等'}]" :key="k.id"
             class="kind-card" :class="{active:monitorForm.kind===k.id,locked:editingId!==null&&monitorForm.kind!==k.id}" :disabled="editingId!==null"
             @click="monitorForm.kind = k.id">
             <span class="kind-icon">{{k.icon}}</span>
@@ -232,6 +319,7 @@ if (view.value === 'monitor') openMonitor(false)
                 </div>
               </div>
             </template>
+            <div v-else class="fld"><label class="fld-label">API Key</label><input v-model="monitorForm.key" type="password" :required="editingId===null" :placeholder="editingId ? '留空则保持原密钥不变' : '用于后端定时检测，加密保存'" maxlength="512"/><small class="fld-hint">搜索服务凭据将加密存储，仅用于后端定时检测</small></div>
           </template>
           <div v-if="monitorForm.kind!=='proxy' && monitorForm.kind!=='db'" class="proxy-row" style="margin-bottom:0">
             <label class="proxy-toggle"><span class="switch"><input v-model="monitorForm.useProxy" type="checkbox"/><span class="slider"></span></span><span><strong>使用服务端代理</strong><small>通过服务器网络访问目标服务</small></span></label>
@@ -240,10 +328,16 @@ if (view.value === 'monitor') openMonitor(false)
         </div>
 
         <div class="wgroup">
-          <div class="wgroup-head"><span>调度与告警</span><small>异常时向以下邮箱发送通知</small></div>
+          <div class="wgroup-head"><span>调度与告警</span><small>状态变更（异常 / 恢复）时自动通知</small></div>
           <div class="grid-2">
             <div class="fld"><label class="fld-label">检测间隔</label><select v-model.number="monitorForm.intervalMinutes"><option :value="1">每 1 分钟</option><option :value="5">每 5 分钟</option><option :value="15">每 15 分钟</option><option :value="60">每小时</option><option :value="1440">每天</option></select></div>
-            <div class="fld"><label class="fld-label">告警邮箱</label><input v-model="monitorForm.emails" placeholder="多个邮箱用逗号分隔"/></div>
+            <div class="fld"><label class="fld-label">通知渠道</label>
+              <div v-if="channels.length" class="channel-checks">
+                <label v-for="c in channels" :key="c.id" class="channel-check"><input type="checkbox" :value="c.id" v-model="monitorForm.channelIds"/><span><strong>{{c.name}}</strong><small>{{c.type==='email' ? c.target : '万记通 · ' + c.target}}</small></span></label>
+              </div>
+              <div v-else class="rd-empty">还没有通知渠道，请先到「通知配置」页添加</div>
+              <small class="fld-hint">状态变更（异常 / 恢复）时通过勾选的渠道发送通知</small>
+            </div>
           </div>
         </div>
         <p v-if="monitorMessage" class="msg">{{monitorMessage}}</p>
@@ -268,11 +362,68 @@ if (view.value === 'monitor') openMonitor(false)
         <div v-if="runsLoading" class="empty">加载中…</div>
         <div v-else-if="!runsList.length" class="empty">暂无执行记录</div>
         <div v-else class="runs">
-          <div v-for="r in runsList" :key="r.id" class="run-row">
+          <div v-for="r in runsList" :key="r.id" class="run-row" role="button" tabindex="0" title="点击查看请求与响应详情" @click="openRunDetail(r)" @keydown.enter="openRunDetail(r)">
             <span class="dot" :class="r.success?'ok':'bad'"></span>
             <div class="run-info"><strong>{{r.success?'成功':'失败'}}</strong><small>{{fmt(r.createdAt)}} · {{r.durationMs}}ms</small></div>
             <small class="run-msg">{{r.message}}</small>
+            <span class="run-open">{{runDetail && runDetail.id===r.id && runDetailLoading ? '加载中…' : '详情 ›'}}</span>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="showChannelForm" class="modal-mask" @wheel.stop @touchmove.stop>
+    <form class="modal" style="width:min(520px,100%)" @submit.prevent="saveChannel">
+      <div class="modal-head">
+        <div class="modal-title"><strong>{{editingChannelId ? '编辑通知渠道' : '新建通知渠道'}}</strong><small>状态变更时通过该渠道发送通知</small></div>
+        <button type="button" class="modal-close" @click="showChannelForm=false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="wgroup" style="margin-bottom:0">
+          <div class="fld"><label class="fld-label">渠道名称</label><input v-model="channelForm.name" required placeholder="例如：我的邮箱 / 运维万记通" maxlength="50"/></div>
+          <div class="fld"><label class="fld-label">渠道类型</label>
+            <div class="chips">
+              <button type="button" :class="{active:channelForm.type==='email'}" @click="channelForm.type='email'">✉ 邮箱</button>
+              <button type="button" :class="{active:channelForm.type==='wanjitong'}" @click="channelForm.type='wanjitong'">◈ 万记通</button>
+            </div>
+          </div>
+          <div v-if="channelForm.type==='email'" class="fld"><label class="fld-label">邮箱地址</label><input v-model="channelForm.target" type="email" :required="editingChannelId===null" :placeholder="editingChannelId ? '留空则保持原邮箱不变' : 'someone@example.com'"/></div>
+          <div v-else class="fld"><label class="fld-label">万记通 API Key</label><input v-model="channelForm.target" type="password" :required="editingChannelId===null" :placeholder="editingChannelId ? '留空则保持原 Key 不变' : '在 wanjitong.cn 个人设置中生成'"/><small class="fld-hint">通知以备忘形式写入该 Key 对应的万记通账号；Key 加密存储，界面仅显示末 4 位</small></div>
+        </div>
+        <p v-if="channelMessage" class="msg">{{channelMessage}}</p>
+      </div>
+      <div class="modal-foot">
+        <span class="foot-hint">监控任务中勾选渠道即可启用通知</span>
+        <div class="foot-btns">
+          <button type="button" class="btn-ghost" @click="showChannelForm=false">取消</button>
+          <button class="btn-primary btn-inline" type="submit">{{editingChannelId ? '保存修改' : '创建渠道'}}</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div v-if="runDetail" class="modal-mask" @click.self="runDetail=null" @wheel.stop @touchmove.stop>
+    <div class="modal run-detail-modal">
+      <div class="modal-head">
+        <div class="modal-title">
+          <strong>{{runsTask?.name}} · 记录详情</strong>
+          <small><span :class="runDetail.success ? 'rd-ok' : 'rd-bad'">{{runDetail.success?'成功':'失败'}}</span> · {{fmt(runDetail.createdAt)}} · 耗时 {{runDetail.durationMs}}ms{{runDetailLoading ? ' · 详情加载中…' : ''}}</small>
+        </div>
+        <button type="button" class="modal-close" @click="runDetail=null">✕</button>
+      </div>
+      <div class="modal-body">
+        <p v-if="runDetail.detailError" class="rd-error">详情加载失败：{{runDetail.detailError}}</p>
+        <p class="rd-message" :class="runDetail.success?'ok':'bad'">{{runDetail.message || '（无消息）'}}</p>
+        <div class="rd-sec">
+          <div class="rd-label">请求内容</div>
+          <pre v-if="runDetail.request">{{runDetail.request}}</pre>
+          <div v-else class="rd-empty">该记录没有保存请求内容（升级前的旧记录不包含请求详情）</div>
+        </div>
+        <div class="rd-sec">
+          <div class="rd-label">响应内容</div>
+          <pre v-if="runDetail.response">{{runDetail.response}}</pre>
+          <div v-else class="rd-empty">该记录没有保存响应内容（升级前的旧记录不包含响应详情）</div>
         </div>
       </div>
     </div>
@@ -441,6 +592,41 @@ input:focus,select:focus{outline:0;border-color:#287fca;box-shadow:0 0 0 3px #28
 .run-info strong{font-size:12.5px}
 .run-info small{color:#8b98a9;font-size:11px}
 .run-msg{margin-left:auto;color:#68788c;font-size:11.5px;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-row{cursor:pointer;transition:.15s}
+.run-row:hover{border-color:#b8d4ee;background:#f7fbff}
+.run-row:focus-visible{outline:2px solid #287fca;outline-offset:1px}
+.run-open{flex:none;font-size:11px;font-weight:600;color:#287fca;white-space:nowrap}
+.run-detail-modal{width:min(780px,100%)}
+.rd-ok{color:#277b54;font-weight:700}
+.rd-bad{color:#b42318;font-weight:700}
+.rd-error{margin:0 0 12px;font-size:12.5px;color:#b42318;background:#fdf0ef;border:1px solid #f3c6c2;border-radius:8px;padding:10px 12px}
+.rd-message{margin:0 0 16px;font-size:12.5px;border-radius:8px;padding:10px 12px;word-break:break-all}
+.rd-message.ok{color:#277b54;background:#edf9f2;border:1px solid #bfe8cf}
+.rd-message.bad{color:#b42318;background:#fdf0ef;border:1px solid #f3c6c2}
+.rd-sec{margin-bottom:16px}
+.rd-label{font-size:12px;font-weight:700;color:#3c4b60;margin-bottom:6px}
+.rd-sec pre{margin:0;white-space:pre-wrap;word-break:break-word;background:#f8fafc;border:1px solid #edf1f6;border-radius:8px;padding:12px 14px;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,Monaco,monospace;color:#33455c;max-height:340px;overflow-y:auto}
+.rd-empty{font-size:12px;color:#8b98a9;background:#fafbfd;border:1px dashed #d4dde8;border-radius:8px;padding:12px 14px}
+.channel-checks{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid #edf1f6;border-radius:8px;padding:10px 12px;background:#fafbfd}
+.channel-check{display:flex;align-items:center;gap:10px;cursor:pointer;padding:3px 2px}
+.channel-check input{width:auto;margin:0;flex:none}
+.channel-check strong{font-size:13px;display:block}
+.channel-check small{color:#8b98a9;font-size:11.5px;display:block}
+.micon.wanjitong{background:#f3effd;color:#7c5cd6}
+.auth-shell{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#f4f6fa 0%,#e9eff8 100%);padding:20px;font-family:Inter,ui-sans-serif,system-ui,sans-serif}
+.auth-card{background:#fff;border:1px solid #e4e9f1;border-radius:16px;box-shadow:0 24px 60px #233b5a14;padding:34px 32px;width:min(400px,100%);display:flex;flex-direction:column;gap:6px}
+.auth-card .brand{font-size:20px;font-weight:800;letter-spacing:-.5px;display:flex;align-items:center;gap:8px}
+.auth-title{font-size:18px;margin:18px 0 2px}
+.auth-sub{color:#68788c;font-size:13px;margin:0 0 14px}
+.auth-tabs{display:flex;gap:4px;background:#f0f3f8;border:1px solid #e3e8f0;border-radius:9px;padding:4px;margin-bottom:16px}
+.auth-tabs button{flex:1;border:0;background:transparent;padding:8px 0;border-radius:6px;font-size:13px;color:#68788c;cursor:pointer;transition:.15s}
+.auth-tabs button.active{background:#fff;color:#17669f;font-weight:700;box-shadow:0 1px 4px #233b5a14}
+.auth-error{font-size:12.5px;color:#b42318;background:#fdf0ef;border:1px solid #f3c6c2;border-radius:8px;padding:9px 12px;margin:2px 0 10px}
+.auth-tip{color:#8b98a9;font-size:13px;margin:14px 0 0}
+.user-zone{margin-left:auto;display:flex;align-items:center;gap:10px}
+.user-chip{font-size:12.5px;font-weight:600;color:#17669f;background:#eef6ff;border:1px solid #c9e2fb;border-radius:999px;padding:6px 12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.logout-btn{border:1px solid #dbe2ec;background:#fff;color:#53677d;border-radius:8px;padding:6px 12px;font-size:12.5px;cursor:pointer;transition:.15s}
+.logout-btn:hover{border-color:#e5484d;color:#b42318}
 @media (max-width:900px){
   .panel-body{grid-template-columns:1fr}
   .type-rail{border-right:0;border-bottom:1px solid #edf1f6}

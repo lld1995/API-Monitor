@@ -12,7 +12,7 @@ public sealed class MonitorController(IEnumerable<IProviderChecker> checkers, Pr
     {
 var definition = ProviderCatalog.Get(input.Provider); if (input.Provider == Provider.Custom && input.Protocol is null) return BadRequest("自定义供应商必须指定协议");
         if (!PublicCheckPolicy.IsAllowed(input.Provider, input.Key)) return BadRequest("供应商或 Key 格式不合法");
-        if (!definition.IsLlm && input.Protocol is not null) return BadRequest("普通 API 不需要协议");
+        if (!definition.IsLlm && input.Protocol is not null) return BadRequest("搜索 API 不需要协议");
 var result = await checkers.Single(x => x.Provider == input.Provider).CheckAsync(input.Key, input.EndpointUrl, input.Protocol, input.Model, input.UseProxy, ct); return Ok(result);
     }
 

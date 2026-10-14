@@ -30,7 +30,16 @@ public async Task<CheckResult> CheckAsync(string proxyUrl, string? targetUrl, st
 
         var sw = Stopwatch.StartNew();
         var isUdp = string.Equals(transportProtocol, "udp", StringComparison.OrdinalIgnoreCase);
-        if (isUdp) return await Socks5UdpChecker.CheckAsync(proxyUrl, username, password, ct);
+        if (isUdp)
+        {
+            var udpResult = await Socks5UdpChecker.CheckAsync(proxyUrl, username, password, ct);
+            return udpResult with
+            {
+                RequestDetail = $"SOCKS5 UDP ASSOCIATE + DNS 查询 example.com（8.8.8.8:53）\n代理: {CheckDump.SafeUrl(proxyUrl)}（UDP）{(string.IsNullOrWhiteSpace(username) ? "" : $"\n用户: {username}")}",
+                ResponseDetail = udpResult.Message
+            };
+        }
+        var requestDump = $"GET {target}\n代理: {CheckDump.SafeUrl(proxyUrl)}（{(string.IsNullOrWhiteSpace(username) ? "TCP" : "TCP，用户 " + username)}）\nUser-Agent: ApiMonitor/1.0";
         try
         {
             using var handler = BuildHandler(proxyUrl, username, password);
@@ -41,11 +50,12 @@ public async Task<CheckResult> CheckAsync(string proxyUrl, string? targetUrl, st
             sw.Stop();
             var code = (int)response.StatusCode;
             var ok = response.StatusCode is HttpStatusCode.OK or HttpStatusCode.NoContent;
-            return new(ok, ok ? $"代理 TCP 链路可用，目标返回 HTTP {code}" : $"代理 TCP 链路已连通但目标返回 HTTP {code}", sw.ElapsedMilliseconds);
+            return new(ok, ok ? $"代理 TCP 链路可用，目标返回 HTTP {code}" : $"代理 TCP 链路已连通但目标返回 HTTP {code}", sw.ElapsedMilliseconds,
+                RequestDetail: requestDump, ResponseDetail: CheckDump.Response(code, response.ReasonPhrase, null));
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new(false, "通过代理访问超时（15 秒）", sw.ElapsedMilliseconds); }
-        catch (HttpRequestException ex) { return new(false, "代理连接失败：" + DetailedError(ex), sw.ElapsedMilliseconds); }
-        catch (Exception ex) { return new(false, "代理检测异常：" + DetailedError(ex), sw.ElapsedMilliseconds); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new(false, "通过代理访问超时（15 秒）", sw.ElapsedMilliseconds, RequestDetail: requestDump); }
+        catch (HttpRequestException ex) { return new(false, "代理连接失败：" + DetailedError(ex), sw.ElapsedMilliseconds, RequestDetail: requestDump); }
+        catch (Exception ex) { return new(false, "代理检测异常：" + DetailedError(ex), sw.ElapsedMilliseconds, RequestDetail: requestDump); }
     }
 
     private static SocketsHttpHandler BuildHandler(string proxyUrl, string? username, string? password)

@@ -50,6 +50,7 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
     {
         if (string.IsNullOrWhiteSpace(user)) return new(false, "请填写数据库用户名", 0);
         var sw = Stopwatch.StartNew();
+        var requestDump = $"MySQL 协议连接 {host}:{port}{(string.IsNullOrWhiteSpace(database) ? "" : $" · 数据库 {database}")}\n用户: {user}（密码不显示）\n执行: SELECT 1";
         try
         {
             var builder = new MySqlConnectionStringBuilder
@@ -65,11 +66,11 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
             await command.ExecuteScalarAsync(ct);
             sw.Stop();
             var version = connection.ServerVersion;
-            return new(true, $"连接成功，服务端版本 {version}", sw.ElapsedMilliseconds);
+            return new(true, $"连接成功，服务端版本 {version}", sw.ElapsedMilliseconds, RequestDetail: requestDump, ResponseDetail: $"连接成功（握手 + SELECT 1 通过）\n服务端版本: {version}");
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new(false, "数据库连接超时", sw.ElapsedMilliseconds); }
-        catch (MySqlException ex) { return new(false, $"MySQL 错误 {ex.ErrorCode}：{Trim(ex.Message)}", sw.ElapsedMilliseconds); }
-        catch (Exception ex) { return new(false, Trim(ex.Message), sw.ElapsedMilliseconds); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new(false, "数据库连接超时", sw.ElapsedMilliseconds, RequestDetail: requestDump); }
+        catch (MySqlException ex) { return new(false, $"MySQL 错误 {ex.ErrorCode}：{Trim(ex.Message)}", sw.ElapsedMilliseconds, RequestDetail: requestDump, ResponseDetail: $"MySQL 错误 {ex.ErrorCode}：{Trim(ex.Message)}"); }
+        catch (Exception ex) { return new(false, Trim(ex.Message), sw.ElapsedMilliseconds, RequestDetail: requestDump); }
     }
 
     private async Task<CheckResult> CheckTDengineAsync(string host, int port, string? database, string? user, string? password, CancellationToken ct)
@@ -78,6 +79,7 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
         try
         {
             var url = $"http://{host}:{port}/rest/sql{(string.IsNullOrWhiteSpace(database) ? "" : "/" + Uri.EscapeDataString(database))}";
+            var requestDump = $"POST {url}\n{(string.IsNullOrWhiteSpace(user) ? "" : $"Authorization: Basic ****（用户 {user}）\n")}Content-Type: text/plain\n\nSELECT server_version()";
             using var request = new HttpRequestMessage(HttpMethod.Post, url);
             request.Headers.Add("User-Agent", "ApiMonitor/1.0");
             if (!string.IsNullOrWhiteSpace(user))
@@ -87,8 +89,9 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
             using var response = await clients.CreateClient("db-check").SendAsync(request, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
             sw.Stop();
-            if (!response.IsSuccessStatusCode) return new(false, $"HTTP {(int)response.StatusCode}：{Trim(body)}", sw.ElapsedMilliseconds);
-            return new(true, "TDengine REST 接口可用", sw.ElapsedMilliseconds);
+            var responseDump = CheckDump.Response((int)response.StatusCode, response.ReasonPhrase, CheckDump.Clip(body, 4096));
+            if (!response.IsSuccessStatusCode) return new(false, $"HTTP {(int)response.StatusCode}：{Trim(body)}", sw.ElapsedMilliseconds, RequestDetail: requestDump, ResponseDetail: responseDump);
+            return new(true, "TDengine REST 接口可用", sw.ElapsedMilliseconds, RequestDetail: requestDump, ResponseDetail: responseDump);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new(false, "TDengine 请求超时", sw.ElapsedMilliseconds); }
         catch (Exception ex) { return new(false, Trim(ex.Message), sw.ElapsedMilliseconds); }
@@ -102,6 +105,7 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
         try
         {
             var url = $"http://{host}:{port}/v2/vectordb/collections/list";
+            var requestDump = $"POST {url}\nAuthorization: Bearer {user}:****\nContent-Type: application/json\n\n{{}}";
             var client = clients.CreateClient("db-check");
             // 先用相同接口做无凭据对照；未开启鉴权的 Milvus 会对任意账号密码返回 code=0。
             using (var anonymous = new HttpRequestMessage(HttpMethod.Post, url))
@@ -110,7 +114,8 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
                 using var anonymousResponse = await client.SendAsync(anonymous, ct);
                 var anonymousBody = await anonymousResponse.Content.ReadAsStringAsync(ct);
                 if (IsMilvusSuccess(anonymousResponse, anonymousBody))
-                    return new(true, "Milvus 连接成功（服务未启用鉴权，未验证用户名和密码）", sw.ElapsedMilliseconds);
+                    return new(true, "Milvus 连接成功（服务未启用鉴权，未验证用户名和密码）", sw.ElapsedMilliseconds,
+                        RequestDetail: requestDump, ResponseDetail: "无凭据对照请求即成功（服务未启用鉴权）\n\n" + CheckDump.Clip(anonymousBody, 4096));
             }
 
             using var request = new HttpRequestMessage(HttpMethod.Post, url);
@@ -119,9 +124,10 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
             request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
             using var response = await client.SendAsync(request, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
+            var responseDump = CheckDump.Response((int)response.StatusCode, response.ReasonPhrase, CheckDump.Clip(body, 4096));
             if (!IsMilvusSuccess(response, body))
-                return new(false, $"Milvus 认证或请求失败（HTTP {(int)response.StatusCode}）：{Trim(body)}", sw.ElapsedMilliseconds);
-            return new(true, "Milvus 连接及认证成功", sw.ElapsedMilliseconds);
+                return new(false, $"Milvus 认证或请求失败（HTTP {(int)response.StatusCode}）：{Trim(body)}", sw.ElapsedMilliseconds, RequestDetail: requestDump, ResponseDetail: responseDump);
+            return new(true, "Milvus 连接及认证成功", sw.ElapsedMilliseconds, RequestDetail: requestDump, ResponseDetail: responseDump);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new(false, "Milvus 请求超时", sw.ElapsedMilliseconds); }
         catch (Exception ex) { return new(false, Trim(ex.Message), sw.ElapsedMilliseconds); }
@@ -145,6 +151,7 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
         try
         {
             var url = $"http://{host}:{port}/";
+            var requestDump = $"GET {url}{(string.IsNullOrWhiteSpace(user) ? "" : $"\nAuthorization: Basic ****（用户 {user}）")}";
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Add("User-Agent", "ApiMonitor/1.0");
             if (!string.IsNullOrWhiteSpace(user))
@@ -154,7 +161,8 @@ DbKind.Milvus => await CheckMilvusAsync(host, port, user, password, ct),
             sw.Stop();
             // TuGraph 根路径返回 200/401/403 都说明服务在线
             var online = response.StatusCode is HttpStatusCode.OK or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
-            return new(online, online ? $"TuGraph 服务在线（HTTP {(int)response.StatusCode}）" : $"HTTP {(int)response.StatusCode}", sw.ElapsedMilliseconds);
+            return new(online, online ? $"TuGraph 服务在线（HTTP {(int)response.StatusCode}）" : $"HTTP {(int)response.StatusCode}", sw.ElapsedMilliseconds,
+                RequestDetail: requestDump, ResponseDetail: CheckDump.Response((int)response.StatusCode, response.ReasonPhrase, null));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new(false, "TuGraph 请求超时", sw.ElapsedMilliseconds); }
         catch (Exception ex) { return new(false, Trim(ex.Message), sw.ElapsedMilliseconds); }
