@@ -13,3 +13,4 @@ ApiMonitor.Api/appsettings.json
 ApiMonitor.Api/appsettings.*.json
 *.user
 .tmp
+!ApiMonitor.Api/appsettings.example.json
