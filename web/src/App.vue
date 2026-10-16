@@ -22,7 +22,7 @@ async function submitAuth() {
 async function logout() { stopMonitorPolling(); try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {} authed.value = false; showForm.value = false; runsTask.value = null; runDetail.value = null; showChannelForm.value = false }
 const view = ref<'check'|'monitor'|'notify'>(window.location.pathname === '/monitor' ? 'monitor' : window.location.pathname === '/notifications' ? 'notify' : 'check'), monitors = ref<Monitor[]>([]), monitorLoading = ref(false), monitorMessage = ref('')
 let monitorTimer: ReturnType<typeof setInterval> | undefined
-const monitorForm = ref({name:'', kind:'http', provider:'OpenAIOfficial', protocol:'OpenAI', url:'', model:'', key:'', useProxy:false, intervalMinutes:5, channelIds:[] as number[], proxyType:'http', proxyProtocol:'tcp', proxyUrl:'', proxyUsername:'', proxyPassword:'', dbType:'mysql', dbHost:'', dbPort:3306, dbName:'', dbUser:'', dbPassword:'', wanjitongKeys:''})
+const monitorForm = ref({name:'', kind:'http', provider:'OpenAIOfficial', protocol:'OpenAI', url:'', model:'', key:'', useProxy:false, intervalMinutes:5, channelIds:[] as number[], proxyType:'http', proxyProtocol:'tcp', proxyUrl:'', proxyUsername:'', proxyPassword:'', dbType:'mysql', dbHost:'', dbPort:3306, dbName:'', dbUser:'', dbPassword:''})
 const showForm = ref(false), editingId = ref<number|null>(null)
 const runsTask = ref<Monitor|null>(null), runsList = ref<any[]>([]), runsLoading = ref(false)
 const runDetail = ref<Record<string, any>|null>(null), runDetailLoading = ref(false)

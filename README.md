@@ -94,6 +94,18 @@ cd publish && dotnet ApiMonitor.Api.dll
 
 单服务即可同时提供 API 与页面。反向代理时注意转发 `Cookie` 头。
 
+## Docker 部署
+
+项目根目录提供 `Dockerfile`（多阶段：Node 构建前端 → .NET 发布 → aspnet 运行时）与 `run.sh` 一键部署脚本：
+
+```bash
+bash run.sh          # 默认 5240 端口；自定义：bash run.sh 8080
+```
+
+脚本行为：构建镜像 → 在宿主机 `/root/api-monitor-data` 首次生成 `appsettings.json`（`KeyEncryptionSecret` 随机生成，后续勿改）→ 以 `--restart unless-stopped` 启动容器，SQLite 数据库、配置与 Cookie 加密密钥均持久化在该目录。更新版本时重新同步代码后再执行 `bash run.sh` 即可（数据保留）。
+
+单代理时注意转发 `Cookie` 头。
+
 ## 安全说明
 
 - 用户密码 PBKDF2-SHA256（10 万次迭代 + 随机盐）散列存储

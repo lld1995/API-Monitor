@@ -1,0 +1,16 @@
+.git/
+**/bin/
+**/obj/
+**/artifacts/
+**/node_modules/
+**/dist/
+ApiMonitor.Api/wwwroot/
+web/src/assets/hero.png
+*.db
+*.db-*
+*.log
+run-out.log
+run-err.log
+backend*.log
+frontend.log
+.env
