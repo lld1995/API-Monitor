@@ -1,81 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0A1120"/>
-      <stop offset="0.55" stop-color="#0E1A30"/>
-      <stop offset="1" stop-color="#132645"/>
+      <stop offset="0" stop-color="#090E1A"/>
+      <stop offset="0.5" stop-color="#0C1628"/>
+      <stop offset="1" stop-color="#101F3C"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#38BDF8"/>
       <stop offset="1" stop-color="#6366F1"/>
     </linearGradient>
-    <linearGradient id="chipStroke" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#2C4A78"/>
-      <stop offset="1" stop-color="#3B5CA0"/>
-    </linearGradient>
-    <pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse">
-      <path d="M42 0H0V42" fill="none" stroke="#1C355A" stroke-width="0.7" opacity="0.55"/>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M44 0H0V44" fill="none" stroke="#182C4E" stroke-width="0.6" opacity="0.45"/>
     </pattern>
-    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="16"/>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="22"/>
     </filter>
   </defs>
 
-  <rect width="1200" height="300" fill="url(#bg)"/>
-  <rect width="1200" height="300" fill="url(#grid)"/>
+  <rect width="1200" height="320" fill="url(#bg)"/>
+  <rect width="1200" height="320" fill="url(#grid)"/>
+  <ellipse cx="600" cy="60" rx="420" ry="150" fill="#2E7FD6" opacity="0.10" filter="url(#soft)"/>
+  <ellipse cx="220" cy="300" rx="260" ry="120" fill="#6366F1" opacity="0.07" filter="url(#soft)"/>
+  <ellipse cx="1000" cy="300" rx="260" ry="120" fill="#38BDF8" opacity="0.06" filter="url(#soft)"/>
 
-  <!-- 光晕 -->
-  <ellipse cx="980" cy="70" rx="220" ry="120" fill="#38BDF8" opacity="0.10" filter="url(#soft)"/>
-  <ellipse cx="150" cy="260" rx="240" ry="120" fill="#6366F1" opacity="0.10" filter="url(#soft)"/>
-
-  <!-- 左上状态点（呼吸感） -->
-  <circle cx="64" cy="60" r="5" fill="#34D399"/>
-  <circle cx="64" cy="60" r="10" fill="none" stroke="#34D399" stroke-width="1" opacity="0.35"/>
-
-  <!-- Logo：几何菱形 + 内核 -->
-  <g transform="translate(92,150)">
-    <rect x="-34" y="-34" width="68" height="68" rx="14" transform="rotate(45)" fill="none" stroke="url(#accent)" stroke-width="3"/>
-    <rect x="-19" y="-19" width="38" height="38" rx="9" transform="rotate(45)" fill="url(#accent)"/>
+  <!-- Logo -->
+  <g transform="translate(600,92)">
+    <rect x="-30" y="-30" width="60" height="60" rx="13" transform="rotate(45)" fill="none" stroke="url(#accent)" stroke-width="2.5"/>
+    <rect x="-16" y="-16" width="32" height="32" rx="8" transform="rotate(45)" fill="url(#accent)"/>
   </g>
 
   <!-- 标题 -->
-  <text x="196" y="152" font-size="58" font-weight="800" fill="#F8FAFC" letter-spacing="0.5">API <tspan fill="#5EA2E8">Monitor</tspan></text>
+  <text x="600" y="196" text-anchor="middle" font-size="56" font-weight="800" fill="#F8FAFC" letter-spacing="1">API <tspan fill="#5EA2E8">Monitor</tspan></text>
 
-  <!-- 副标题 -->
-  <text x="200" y="196" font-size="21" fill="#8FA3BF" letter-spacing="1">自部署 API 监控平台 · 定时检测 · 状态变更通知 · 多用户隔离</text>
+  <!-- 渐变短线 -->
+  <rect x="568" y="218" width="64" height="3" rx="1.5" fill="url(#accent)"/>
 
-  <!-- 右上 LIVE 徽标 -->
-  <g transform="translate(1052,48)">
-    <rect width="104" height="30" rx="15" fill="#0E2417" stroke="#1F5A38" stroke-width="1"/>
-    <circle cx="20" cy="15" r="4.5" fill="#34D399"/>
-    <text x="36" y="20.5" font-size="12.5" font-weight="700" fill="#34D399" letter-spacing="1.5">LIVE</text>
-  </g>
-
-  <!-- 底部能力 chips -->
-  <g font-size="14.5" fill="#B9C8DE">
-    <g transform="translate(196,236)">
-      <rect width="86" height="32" rx="9" fill="#0F1D33" stroke="url(#chipStroke)" stroke-width="1"/>
-      <text x="43" y="21.5" text-anchor="middle" font-weight="600">◆ LLM</text>
-    </g>
-    <g transform="translate(292,236)">
-      <rect width="100" height="32" rx="9" fill="#0F1D33" stroke="url(#chipStroke)" stroke-width="1"/>
-      <text x="50" y="21.5" text-anchor="middle" font-weight="600">⌁ 搜索 API</text>
-    </g>
-    <g transform="translate(402,236)">
-      <rect width="92" height="32" rx="9" fill="#0F1D33" stroke="url(#chipStroke)" stroke-width="1"/>
-      <text x="46" y="21.5" text-anchor="middle" font-weight="600">⬡ HTTP</text>
-    </g>
-    <g transform="translate(504,236)">
-      <rect width="92" height="32" rx="9" fill="#0F1D33" stroke="url(#chipStroke)" stroke-width="1"/>
-      <text x="46" y="21.5" text-anchor="middle" font-weight="600">⇄ 代理</text>
-    </g>
-    <g transform="translate(606,236)">
-      <rect width="100" height="32" rx="9" fill="#0F1D33" stroke="url(#chipStroke)" stroke-width="1"/>
-      <text x="50" y="21.5" text-anchor="middle" font-weight="600">⛁ 数据库</text>
-    </g>
-    <g transform="translate(716,236)">
-      <rect width="150" height="32" rx="9" fill="#0F1D33" stroke="url(#chipStroke)" stroke-width="1"/>
-      <text x="75" y="21.5" text-anchor="middle" font-weight="600">✉ 邮箱 / ◈ 万记通</text>
-    </g>
-  </g>
+  <!-- 标语 -->
+  <text x="600" y="262" text-anchor="middle" font-size="19" fill="#8FA3BF" letter-spacing="4">自部署 API 监控平台</text>
 </svg>
